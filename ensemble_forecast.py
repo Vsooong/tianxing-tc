@@ -1,16 +1,13 @@
 import sys
-
-sys.path.append("/data3/WangGuanSong/TianXing/")
 from generate_per import SphericalGaussian, Brown
 from math import ceil
 import torch
 import gc
 import pandas as pd
 import numpy as np
-from model.tianxing import TianXing, ordering
 import datetime as dt
 import xarray as xr
-from track_field import extract_field
+from track_field import WeatherModel, ordering
 import h5py
 
 
@@ -21,7 +18,7 @@ def add_perturbation(
     tau=3,
     en_num=14,
     batch_size=7,
-):  
+):
     if en_num == 1:
         return input_x
     nensemble = en_num - 1
@@ -63,39 +60,15 @@ def Running_Ensemble_Inference(
     device_id=1,
     nensemble=15,
 ):
-    # tcir_path = (
-    #     "/data3/WangGuanSong/TianXing/tropical cyclone/data/TCIR-ATLN_EPAC_WPAC.h5"
-    # )
-    # data_info = pd.read_hdf(tcir_path, key="info", mode="r")
-    # indexes = data_info[data_info["ID"].isin([tc_id])].index
-    # idx = indexes[start_step]
-    # time_now = data_info.iloc[idx, 4]
-    # # to timestamp
-    # time_now = pd.Timestamp(
-    #     time_now[:4] + "-" + time_now[4:6] + "-" + time_now[6:8] + " " + time_now[8:10]
-    # )
-    # print(time_now)
-    # dataset = Fuxi_dataset_month_nc(
-    #     years=["2004", "2010", "2013", "2015", "2016"], timestamps=[time_now]
-    # )
-    # model = FuXi_model(device=device)
-    # ds, timestamp = dataset[time_now]
-    # ds = ds[np.newaxis, ...]
-    # ds = torch.from_numpy(ds).to(device)
-    # perts = add_perturbation(ds, method="SphericalGaussian", noise_amplitude=0.15)
-    # perts = perts.to(device)
-    # print(ds.shape)
-    # outputs = model.run_steps(ds, timestamp, num_steps=16)
 
-    model_path = "/data3/WangGuanSong/Weaformer/all_models/weaformer_v2.0/"
-    model_wrapper = TianXing(root_path=model_path)
-    if  input_path is not None:
+    model_wrapper = WeatherModel
+    if input_path is not None:
         all_fields = model_wrapper.load_input_from_given_nc(input_path)
         all_fields = model_wrapper.normalise(all_fields)
     elif timestamp is not None:
         all_fields = model_wrapper.load_input_from_arxiv(timestamp, return_all=False)
         all_fields = model_wrapper.normalise(all_fields)
-    
+
     else:
         raise ValueError("timestamp or input_path should be provided")
 
@@ -119,8 +92,10 @@ def Running_Ensemble_Inference(
 
     start_lon = label_lon[0]
     start_lat = label_lat[0]
-    print(perts.shape)
-    preds = model_wrapper.forward_trajectory_new(perts, times=16, save_steps=save_steps,sub_batch_size=2)
+
+    preds = model_wrapper.forward_trajectory_new(
+        perts, times=16, save_steps=save_steps, sub_batch_size=2
+    )
     print(preds.shape)  # (nensemble, 16, 73, 721, 1440)
     # return
     input_field = input_field.cpu().numpy()
@@ -141,7 +116,7 @@ def Running_Ensemble_Inference(
         track_field, track_lons, track_lats = extract_field(
             pred_global, initial_lon=start_lon, initial_lat=start_lat
         )
-        save_path = f"/data3/WangGuanSong/TianXing/tropical cyclone/pictures/fig2/{tc_id}_{i}_{timestamp}.h5"
+        save_path = f".../{tc_id}_{i}_{timestamp}.h5"
         with h5py.File(save_path, "w") as f:
             f.create_dataset("track_field", data=track_field)
             f.create_dataset("track_lons", data=track_lons)
@@ -150,7 +125,6 @@ def Running_Ensemble_Inference(
             f.create_dataset("ID", data=tc_id)
 
     return
-
 
 
 def plot_perturbation():
@@ -179,14 +153,15 @@ def plot_perturbation():
         dims=["lat", "lon"],
         coords=dict(lat=lats, lon=lons),
     )
-    ax.imshow(data, cmap="coolwarm", transform=ccrs.PlateCarree(), interpolation="nearest")
+    ax.imshow(
+        data, cmap="coolwarm", transform=ccrs.PlateCarree(), interpolation="nearest"
+    )
     plt.tight_layout()
     plt.savefig(
         f"/data3/WangGuanSong/TianXing/tropical cyclone/pictures/other/perturbation_{i}.png"
     )
     plt.close()
     # channel_mask[:, [0,1,2,3,5,7,60,61,62,63,64,65,66,67,68,69,70,71,72], :, :] = 0
-
 
 
 if __name__ == "__main__":

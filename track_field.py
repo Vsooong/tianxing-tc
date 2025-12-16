@@ -7,8 +7,83 @@ import sys
 import torch
 import pandas as pd
 
-from model.utils import Fuxi_dataset_month_nc, save_pred
-from model.fuxi_run import FuXi_model, ordering
+WeatherModel = None  # not open-sourced
+ordering = [
+    "u10m",
+    "v10m",
+    "u100m",
+    "v100m",
+    "t2m",
+    "sp",
+    "msl",
+    "tcwv",
+    "u50",
+    "u100",
+    "u150",
+    "u200",
+    "u250",
+    "u300",
+    "u400",
+    "u500",
+    "u600",
+    "u700",
+    "u850",
+    "u925",
+    "u1000",
+    "v50",
+    "v100",
+    "v150",
+    "v200",
+    "v250",
+    "v300",
+    "v400",
+    "v500",
+    "v600",
+    "v700",
+    "v850",
+    "v925",
+    "v1000",
+    "z50",
+    "z100",
+    "z150",
+    "z200",
+    "z250",
+    "z300",
+    "z400",
+    "z500",
+    "z600",
+    "z700",
+    "z850",
+    "z925",
+    "z1000",
+    "t50",
+    "t100",
+    "t150",
+    "t200",
+    "t250",
+    "t300",
+    "t400",
+    "t500",
+    "t600",
+    "t700",
+    "t850",
+    "t925",
+    "t1000",
+    "r50",
+    "r100",
+    "r150",
+    "r200",
+    "r250",
+    "r300",
+    "r400",
+    "r500",
+    "r600",
+    "r700",
+    "r850",
+    "r925",
+    "r1000",
+    # "sst",
+]
 
 
 def extract_field_tx(
@@ -18,7 +93,6 @@ def extract_field_tx(
     initial_lat=23.7,
     forecast_steps=28,
 ):
-   
 
     data = xr.open_dataarray(filename)
     data = data.sel(step=slice(1, forecast_steps))
@@ -54,15 +128,15 @@ def extract_field_tx(
         print(min_msl_lon, min_msl_lat)
         last_lon = min_msl_lon
         last_lat = min_msl_lat
-        
+
         # subtract the field center (size 51x51) at track location
         lon_idx = int(abs(lons - min_msl_lon).argmin())
         lat_idx = int(abs(lats - min_msl_lat).argmin())
         lon_slice = slice(max(0, lon_idx - 25), min(len(lons), lon_idx + 25 + 1))
         lat_slice = slice(max(0, lat_idx - 25), min(len(lats), lat_idx + 25 + 1))
 
-        data_tensor = data.isel(lon=lon_slice, lat=lat_slice).sel(step=step).squeeze(
-            dim="time"
+        data_tensor = (
+            data.isel(lon=lon_slice, lat=lat_slice).sel(step=step).squeeze(dim="time")
         )
         # padding the last dim of  field to 51 if necessary
         if data_tensor.shape[-1] != 51:
@@ -76,7 +150,7 @@ def extract_field_tx(
 
     track_lons[0] = initial_lon
     track_lats[0] = initial_lat
-    
+
     return track_lons, track_lats
 
 
@@ -121,25 +195,44 @@ def plot_track(lons, lats):
     gl.top_labels = False
     gl.right_labels = False
 
- 
     plt.legend(loc="upper left")
     plt.show()
 
 
-def generate_fuxi_prediction(time="2021-07-18 18:00:00"):
+def save_pred(
+    preds, time, steps: list, variable, lat, lon, model_name, num_steps, save_dir
+):
+    os.makedirs(save_dir, exist_ok=True)
+    assert len(preds) == len(steps)
+    init_time = pd.to_datetime(time)
+    ds = xr.DataArray(
+        preds[None],
+        dims=["time", "step", "variable", "lat", "lon"],
+        coords=dict(
+            time=[init_time],
+            step=steps,
+            variable=variable,
+            lat=lat,
+            lon=lon,
+        ),
+    ).astype(np.float32)
+    save_name = os.path.join(save_dir, f"{model_name}_{init_time}_{num_steps}.nc")
+    ds.to_netcdf(save_name, mode="w")
+
+
+def generate_prediction(time="2021-07-18 18:00:00"):
     if isinstance(time, str):
         time = pd.to_datetime(time)
 
     # dataset = Fuxi_dataset_month_nc()
-    dataset = Fuxi_dataset_month_nc(years=["2004", "2013", "2015"])
-    dataset.timestamps = pd.date_range("2004-01-01", "2015-12-31", freq="6H")
+    dataset = weather_dataset  # not open-sourced
     idx = dataset.get_idx(time)
     ds, timestamp = dataset[idx]
     print(timestamp, ds.shape)
 
     ds = ds[np.newaxis, ...]
     device = torch.device(f"cuda:5")
-    fuxi = FuXi_model(device=device)
+    fuxi = WeatherModel(device=device)
     outputs = fuxi.run_steps(ds, timestamp, num_steps=28)
     file_path = f"/data3/WangGuanSong/TianXing/tropical cyclone/pictures"
     save_pred(
@@ -152,14 +245,3 @@ def generate_fuxi_prediction(time="2021-07-18 18:00:00"):
         model_name="fuxi",
         save_dir=file_path,
     )
-
-
-if __name__ == "__main__":
-    import cartopy.crs as ccrs
-
-    file_name = "/data3/WangGuanSong/TianXing/data/arxiv/predict/fengwu_v2_2021-07-24 00:00:00_40.nc"
-    track_lons, track_lats = extract_field_tx(
-        filename=file_name, forecast_steps=28, initial_lat=26.5, initial_lon=124.5
-    )
-    plot_track(track_lons, track_lats)
-

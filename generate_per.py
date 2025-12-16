@@ -2,9 +2,6 @@ import numpy as np
 import sys
 import datetime as dt
 from math import ceil
-
-sys.path.append("/data3/WangGuanSong/TianXing/")
-from model.tianxing import TianXing
 from torch_harmonics import InverseRealSHT
 import matplotlib.pyplot as plt
 import torch
@@ -265,67 +262,3 @@ def load_input(model_wrapper, data_time=dt.datetime(2021, 7, 19, 18, 0)):
     latitude = latitude.to(model_wrapper.device, dtype=torch.float32)
     return input_field, latitude
 
-
-if __name__ == "__main__":
-    import gc
-
-    per_name = "BredVector"
-    model_path = "/data3/WangGuanSong/Weaformer/all_models/weaformer_v2.0/"
-    lead_time = 24
-    model_wrapper = TianXing(root_path=model_path, lead_time=lead_time)
-    input_field, latitude = load_input(model_wrapper)
-    print(input_field.max(), input_field.min(), input_field.mean(), input_field.std())
-    print(input_field.shape)
-    exit(0)
-    noise_amplitude = 0.05
-    perturbation_dict = {
-        "Gaussian": Gaussian(noise_amplitude=noise_amplitude),
-        "SphericalGaussian": SphericalGaussian(
-            noise_amplitude=noise_amplitude, alpha=2, tau=20.0, sigma=None
-        ),
-        "Brown": Brown(noise_amplitude=noise_amplitude, reddening=1.0),
-        "BredVector": BredVector(
-            model=model_wrapper,
-            noise_amplitude=noise_amplitude,
-            integration_steps=25,
-            ensemble_perturb=False,
-            seeding_perturbation_method=Brown(
-                noise_amplitude=noise_amplitude, reddening=1.0
-            ),
-        ),
-    }
-
-    perturbation = perturbation_dict[per_name]
-    nensemble = 51
-    batch_size = 2
-    if batch_size is None:
-        batch_size = nensemble
-    number_of_batches = ceil(nensemble / batch_size)
-    ensemble_index = 0
-    all_perts = []
-    for i in range(number_of_batches):
-        ensemble_index = i * batch_size
-        mini_batch_size = min(batch_size, nensemble - ensemble_index)
-        batch_input = input_field.repeat(mini_batch_size, 1, 1, 1)
-        perturbed_field = perturbation(batch_input)
-        perts = (perturbed_field - batch_input).cpu()
-        perts = perts * 278.845 / torch.mean(torch.norm(perts, p=2, dim=(1, 2, 3)))
-        all_perts.append(perts)
-        gc.collect()
-
-    # add 0 perturbation for control
-    perts = torch.zeros_like(input_field).cpu()
-    all_perts.append(perts)
-    perts = torch.cat(all_perts, dim=0)
-    print(perts.shape)
-    print(
-        perts.min(),
-        perts.max(),
-        perts.mean(),
-        perts.std(),
-        torch.norm(perts, p=2, dim=(1, 2, 3)),
-    )
-    # save the perturbation
-    torch.save(
-        perts, f"/data3/WangGuanSong/TianXing/Perturbation samples/{per_name}.pt"
-    )
